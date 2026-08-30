@@ -1,0 +1,1531 @@
+---
+title: "Tugas 1 Praktikum MPDW"
+author: "Fadly Syabani"
+date: "`r Sys.Date()`"
+output: rmdformats::readthedown
+    
+---
+
+## Packages
+```{r}
+library(forecast)
+library(graphics)
+library(TTR)
+library(TSA)
+library(rio)
+library(ggplot2)
+```
+
+## Impor Data
+```{r}
+data <- read.csv("C:/Users/hp/Downloads/dataset_mpdw.csv")
+data$tanggal <- as.Date(data$tanggal, format = "%m/%d/%Y")
+head(data)
+```
+
+## Eksplorasi Data
+`View()` : menampilkan data dalam bentuk tabel, `str()` : menampilkan struktur data, `dim()` : menampilkan dimensi data
+```{r}
+View(data)
+str(data)
+dim(data)
+```
+
+Mengubah data agar terbaca sebagai data deret waktu dengan fungsi `ts()` dan menampilkan ringkasan data.
+```{r}
+data.ts <- ts(data$pm25)
+summary(data.ts)
+```
+
+Membuat plot data deret waktu
+
+```{r}
+ts.plot(data.ts, xlab="Periode", ylab="Konsentrasi PM2.5 (µg/m³)", 
+        main = "Time Series Plot Konsentrasi PM2.5")
+points(data.ts)
+```
+
+
+## Moving Average
+
+### Pembagian Data
+
+Pembagian data latih dan data uji dilakukan dengan perbandingan 80% data latih dan 20% data uji.
+
+```{r}
+# hitung jumlah data
+n <- nrow(data)
+
+# tentukan batas 80%
+n_train <- floor(0.8 * n)
+
+# bagi data
+training_ma <- data[1:n_train, ]
+testing_ma  <- data[(n_train+1):n, ]
+
+# ubah ke time series
+train_ma.ts <- ts(training_ma$pm25)
+test_ma.ts  <- ts(testing_ma$pm25)
+
+n_train
+nrow(testing_ma)
+```
+
+Eksplorasi data dilakukan pada keseluruhan data, data latih, serta data uji menggunakan plot data deret waktu.
+```{r}
+#eksplorasi keseluruhan data
+plot(
+  data.ts,
+  col = "red",
+  main = "Plot Semua Data",
+  xlab = "Periode",
+  ylab = "Konsentrasi PM2.5 (µg/m³)"
+)
+points(data.ts)
+
+#eksplorasi data latih
+plot(
+  train_ma.ts,
+  col = "blue",
+  main = "Plot Data Latih",
+  xlab = "Periode",
+  ylab = "Konsentrasi PM2.5 (µg/m³)"
+)
+points(train_ma.ts)
+
+#eksplorasi data uji
+plot(
+  test_ma.ts,
+  col = "blue",
+  main = "Plot Data Uji",
+  xlab = "Periode",
+  ylab = "Konsentrasi PM2.5 (µg/m³)"
+)
+points(test_ma.ts)
+```
+
+Eksplorasi data juga dapat dilakukan menggunakan package `ggplot2`
+```{r}
+ggplot() + 
+  geom_line(data = training_ma, aes(x = tanggal, y = pm25, col = "Data Latih")) +
+  geom_line(data = testing_ma, aes(x = tanggal, y = pm25, col = "Data Uji")) +
+  labs(x = "Periode", y = "Konsentrasi PM2.5 (µg/m³)", color = "Legend") +
+   scale_colour_manual(name="Keterangan:", breaks = c("Data Latih", "Data Uji"),
+                      values = c("blue", "red")) + 
+  theme_bw() + theme(legend.position = "bottom",
+                     plot.caption = element_text(hjust=0.5, size=12))
+ 
+```
+
+### Single Moving Average (SMA)
+
+Ide dasar dari Single Moving Average (SMA) adalah data suatu periode dipengaruhi oleh data periode sebelumnya. Metode pemulusan ini cocok digunakan untuk pola data stasioner atau konstan. Prinsip dasar metode pemulusan ini adalah data pemulusan pada periode ke-t merupakan rata rata dari m buah data pada periode ke-t hingga periode ke (t-m+1).
+
+$$S_t = \frac{1}{m} \sum_{i=t-m+1}^{t} X_i
+$$$$S_t = \frac{1}{m} \sum_{i=t-m+1}^{t} X_i$$
+
+Data pemulusan pada periode ke-t selanjutnya digunakan sebagai nilai peramalan pada periode ke t+1.
+
+$$F_t = S_{t-1}, F_{n,h} = S_n$$
+
+Pemulusan menggunakan metode SMA dilakukan dengan fungsi `SMA()`. Dalam hal ini akan dilakukan pemulusan dengan parameter `m=4`.
+
+```{r}
+data.sma<-SMA(train_ma.ts, n=4)
+data.sma
+```
+
+Data pemulusan pada periode ke-t selanjutnya digunakan sebagai nilai peramalan pada periode ke t+1 sehingga hasil peramalan 1 periode kedepan adalah sebagai berikut.
+
+```{r}
+data.ramal<-c(NA,data.sma)
+data.ramal
+```
+
+Selanjutnya dilakukan peramalan sebanyak 33 periode sesuai dengan jumlah data uji. Pada metode SMA, seluruh hasil peramalan untuk 33 periode ke depan akan memiliki nilai yang sama dengan hasil ramalan satu periode ke depan.
+
+```{r}
+n_test <- nrow(testing_ma)
+
+data.gab <- cbind(
+  aktual = c(data.ts),
+  pemulusan = c(data.sma, rep(NA, n_test)),
+  ramalan = c(data.ramal,
+              rep(data.ramal[length(data.ramal)], n_test - 1))
+)
+
+data.gab 
+```
+
+Adapun plot data deret waktu dari hasil peramalan yang dilakukan adalah sebagai berikut.
+
+```{r}
+ts.plot(data.ts, xlab="Periode", ylab="Konsentrasi PM2.5 (µg/m³)", main= "SMA N=4 Data Konsentrasi PM2.5")
+points(data.ts)
+lines(data.gab[,2],col="green",lwd=2)
+lines(data.gab[,3],col="red",lwd=2)
+legend("topleft",c("data aktual","data pemulusan","data peramalan"), lty=1, col=c("black","green","red"), cex=0.7)
+```
+
+Selanjutnya perhitungan akurasi dilakukan dengan ukuran akurasi *Sum Squares Error* (SSE), *Mean Square Error* (MSE) dan *Mean Absolute Percentage Error* (MAPE). Perhitungan akurasi dilakukan baik pada data latih maupun pada data uji.
+
+$$SSE = \sum_{t=1}^{n} (y_t - \hat{y}_t)^2$$
+
+$$MSE = \frac{1}{n} \sum_{t=1}^{n} (y_t - \hat{y}_t)^2$$
+
+$$MAPE = \frac{1}{n} \sum_{t=1}^{n} \left|\frac{y_t - \hat{y}_t}{y_t}\right| * 100$$
+
+#### Akurasi Data Latih
+
+```{r}
+error_train.sma = train_ma.ts-data.ramal[1:length(train_ma.ts)]
+
+SSE_train.sma = sum(error_train.sma[5:length(train_ma.ts)]^2)
+MSE_train.sma = mean(error_train.sma[5:length(train_ma.ts)]^2)
+MAPE_train.sma = mean(abs((error_train.sma[5:length(train_ma.ts)]/train_ma.ts[5:length(train_ma.ts)])*100))
+
+akurasi_train.sma <- matrix(c(SSE_train.sma, MSE_train.sma, MAPE_train.sma))
+row.names(akurasi_train.sma)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi_train.sma) <- c("Akurasi m = 4")
+akurasi_train.sma
+```
+
+Berdasarkan hasil perhitungan akurasi data latih, metode SMA dengan m = 4 menghasilkan nilai SSE sebesar 41.070,94, MSE sebesar 331,22, dan MAPE sebesar 30,70%. Nilai MAPE sebesar 30,70% menunjukkan bahwa rata-rata kesalahan hasil pemulusan terhadap data aktual adalah sebesar 30,70%. Berdasarkan nilai tersebut, metode SMA dengan m = 4 memiliki tingkat akurasi yang cukup pada data latih, meskipun masih terdapat kesalahan pemulusan yang relatif cukup besar.
+
+#### Akurasi Data Uji
+
+```{r}
+error_test.sma <- test_ma.ts -
+  data.gab[(n_train + 1):n, 3]
+
+SSE_test.sma = sum(error_test.sma^2)
+MSE_test.sma = mean(error_test.sma^2)
+MAPE_test.sma = mean(abs((error_test.sma/test_ma.ts*100)))
+
+akurasi_test.sma <- matrix(c(SSE_test.sma, MSE_test.sma, MAPE_test.sma))
+row.names(akurasi_test.sma)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi_test.sma) <- c("Akurasi m = 4")
+akurasi_test.sma
+```
+
+Berdasarkan hasil perhitungan akurasi data uji, metode SMA dengan m = 4 menghasilkan nilai SSE sebesar 5.703,06, MSE sebesar 172,82, dan MAPE sebesar 22,43%. Nilai MAPE sebesar 22,43% menunjukkan bahwa rata-rata kesalahan peramalan terhadap data aktual adalah sekitar 22,43%, sehingga metode SMA dengan m = 4 memiliki tingkat akurasi yang cukup pada data uji.
+
+### Double Moving Average (DMA)
+
+Metode pemulusan Double Moving Average (DMA) pada dasarnya mirip dengan SMA. Namun demikian, metode ini lebih cocok digunakan untuk pola data trend. Proses pemulusan dengan rata rata dalam metode ini dilakukan sebanyak 2 kali.
+
+- **Tahap I:**
+
+$$S_{1,t} = \frac{1}{m} \sum_{i=  t-m+1}^{t} X_i$$
+
+- **Tahap II:**
+
+$$S_{2,t} = \frac{1}{m} \sum_{i=t-m+1}^{t} S_{1,i}$$
+
+Forecast $h$ langkah ke depan dihitung dengan:
+
+$$F_{2,t,t+h} = A_t + B_t \,(h)$$
+
+dengan komponen level ($A_t$) dan tren ($B_t$):
+
+$$A_t = 2S_{1,t} - S_{2,t}
+\qquad\text{dan}\qquad
+B_t = \frac{2}{m-1}\,\big(S_{1,t} - S_{2,t}\big)$$
+
+```{r}
+# Pemulusan Pertama dan Kedua
+dma <- SMA(data.sma, n = 4)
+
+At <- 2 * data.sma - dma
+Bt <- 2/(4-1) * (data.sma - dma)
+
+data.dma <- At + Bt
+
+# Forecast
+data.ramal2 <- c(NA, data.dma)
+t <- 1:nrow(testing_ma)
+f <- c()
+for (i in t) {
+  f[i] <-
+    At[length(At)] +
+    Bt[length(Bt)] * i
+}
+
+# Gabungkan hasil
+data.gab2 <- cbind(
+  aktual = c(data.ts),
+
+  pemulusan1 = c(
+    data.sma,
+    rep(NA, nrow(testing_ma))
+  ),
+
+  pemulusan2 = c(
+    dma,
+    rep(NA, nrow(testing_ma))
+  ),
+
+  At = c(
+    At,
+    rep(NA, nrow(testing_ma))
+  ),
+
+  Bt = c(
+    Bt,
+    rep(NA, nrow(testing_ma))
+  ),
+
+  ramalan = c(
+    rep(
+      NA,
+      n_train
+    ),
+    f
+  )
+)
+
+data.gab2
+```
+
+Hasil pemulusan menggunakan metode DMA divisualisasikan sebagai berikut
+
+```{r}
+ts.plot(data.ts,
+        xlab = "Periode",
+        ylab = "Konsentrasi PM2.5 (µg/m³)",
+        main = "DMA N=4 Data Konsentrasi PM2.5")
+
+points(data.ts)
+
+lines(data.gab2[,3], col="green", lwd=2)
+lines(data.gab2[,6], col="red", lwd=2)
+
+legend("topleft",
+       c("Data Aktual", "Data Pemulusan", "Data Peramalan"),
+       lty=8,
+       col=c("black","green","red"),
+       cex=0.8)
+```
+
+Selanjutnya perhitungan akurasi dilakukan baik pada data latih maupun data uji. Perhitungan akurasi dilakukan dengan ukuran akurasi SSE, MSE dan MAPE.
+
+#### Akurasi Data Latih
+
+```{r}
+error_train.dma <- train_ma.ts -
+  data.ramal2[1:length(train_ma.ts)]
+
+SSE_train.dma <- sum(
+  error_train.dma[8:length(train_ma.ts)]^2
+)
+
+MSE_train.dma <- mean(
+  error_train.dma[8:length(train_ma.ts)]^2
+)
+
+MAPE_train.dma <- mean(
+  abs(
+    error_train.dma[8:length(train_ma.ts)] /
+      train_ma.ts[8:length(train_ma.ts)]
+  ) * 100
+)
+
+akurasi_train.dma <- matrix(
+  c(SSE_train.dma, MSE_train.dma, MAPE_train.dma)
+)
+
+row.names(akurasi_train.dma) <- c("SSE", "MSE", "MAPE")
+colnames(akurasi_train.dma) <- c("Akurasi m = 4")
+
+akurasi_train.dma
+```
+Berdasarkan hasil perhitungan akurasi data latih, metode Double Moving Average (DMA) dengan m = 4 menghasilkan nilai SSE sebesar 61.507,82, MSE sebesar 508,33, dan MAPE sebesar 35,26%. Nilai MAPE sebesar 35,26% menunjukkan bahwa rata-rata kesalahan hasil pemulusan terhadap data aktual adalah sekitar 35,26%. Berdasarkan nilai tersebut, metode DMA dengan m = 4 memiliki tingkat akurasi yang cukup pada data latih, meskipun masih terdapat kesalahan pemulusan yang relatif cukup besar.
+
+#### Akurasi Data Uji
+
+```{r}
+error_test.dma <-
+  test_ma.ts -
+  data.gab2[
+    (n_train + 1):n,
+    6
+  ]
+
+SSE_test.dma <-
+  sum(error_test.dma^2)
+
+MSE_test.dma <-
+  mean(error_test.dma^2)
+
+MAPE_test.dma <-
+  mean(
+    abs(
+      error_test.dma /
+      test_ma.ts
+    ) * 100
+  )
+
+akurasi_test.dma <- matrix(
+  c(
+    SSE_test.dma,
+    MSE_test.dma,
+    MAPE_test.dma
+  )
+)
+
+row.names(akurasi_test.dma) <-
+  c("SSE", "MSE", "MAPE")
+
+colnames(akurasi_test.dma) <-
+  "Akurasi m = 4"
+
+akurasi_test.dma
+```
+
+Berdasarkan hasil perhitungan akurasi data uji, metode Double Moving Average (DMA) dengan m = 4 menghasilkan nilai SSE sebesar 462.651,88, MSE sebesar 14.019,75, dan MAPE sebesar 195,33%. Nilai MAPE sebesar 195,33% menunjukkan bahwa rata-rata kesalahan hasil peramalan terhadap data aktual sangat besar, yaitu sekitar 195,33%. Berdasarkan nilai tersebut, metode DMA dengan m = 4 memiliki tingkat akurasi yang sangat rendah pada data uji.
+
+## Exponential Smoothing
+
+Metode Exponential Smoothing merupakan metode pemulusan deret waktu dengan memberikan bobot yang menurun secara eksponensial pada data historis, di mana nilai terbaru mendapat bobot lebih besar dibanding nilai yang lebih lama. Metode ini menggunakan satu atau lebih parameter pemulusan yang secara langsung menentukan besar kecilnya bobot setiap pengamatan. Pemilihan parameter yang tepat akan sangat berpengaruh terhadap hasil ramalan. Secara umum, Exponential Smoothing dibedakan menjadi dua jenis, yaitu model tunggal (single) yang digunakan untuk data tanpa tren maupun musiman, serta model ganda (double) yang mampu menangkap adanya tren pada data.
+
+### Pembagian Data
+
+Pembagian data latih dan data uji dilakukan dengan perbandingan 80% data latih dan 20% data uji.
+
+```{r}
+n <- nrow(data)
+
+n_train <- floor(
+  0.8 * n
+)
+
+training <- data[
+  1:n_train,
+]
+
+testing <- data[
+  (n_train + 1):n,
+]
+
+train.ts <- ts(
+  training$pm25
+)
+
+test.ts <- ts(
+  testing$pm25
+)
+
+h_test <- nrow(testing)
+
+n_train
+h_test
+```
+
+### Eksplorasi
+
+Eksplorasi dilakukan dengan membuat plot data deret waktu untuk keseluruhan data, data latih, dan data uji.
+
+```{r}
+# eksplorasi data keseluruhan
+plot(
+  data.ts,
+  col = "black",
+  main = "Plot Semua Data",
+  xlab = "Periode",
+  ylab = "Konsentrasi PM2.5 (µg/m³)"
+)
+
+points(data.ts)
+
+# eksplorasi data latih
+plot(
+  train.ts,
+  col = "red",
+  main = "Plot Data Latih",
+  xlab = "Periode",
+  ylab = "Konsentrasi PM2.5 (µg/m³)"
+)
+
+points(train.ts)
+
+# eksplorasi data uji
+plot(
+  test.ts,
+  col = "blue",
+  main = "Plot Data Uji",
+  xlab = "Periode",
+  ylab = "Konsentrasi PM2.5 (µg/m³)"
+)
+
+points(test.ts)
+```
+
+```{r}
+ggplot() + 
+  geom_line(data = training,
+            aes(x = tanggal, y = pm25, color = "Data Latih")) +
+  geom_line(data = testing,
+            aes(x = tanggal, y = pm25, color = "Data Uji")) +
+  labs(
+    x = "Periode",
+    y = "Konsentrasi PM2.5 (µg/m³)",
+    color = "Keterangan"
+  ) +
+  scale_colour_manual(
+    values = c(
+      "Data Latih" = "blue",
+      "Data Uji" = "red"
+    )
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "bottom"
+  )
+```
+
+### Single Exponential Smoothing
+
+Single Exponential Smoothing (SES) adalah metode peramalan deret waktu yang dikembangkan untuk mengatasi kelemahan Moving Average. Jika pada Moving Average setiap data periode sebelumnya dianggap memiliki bobot yang sama, maka SES memberikan bobot yang semakin mengecil secara eksponensial terhadap data lama, sehingga data terbaru diberi bobot lebih besar.
+
+Single Exponential Smoothing merupakan metode pemulusan yang tepat digunakan untuk data dengan pola stasioner atau konstan.
+
+Nilai pemulusan pada periode ke-t didapat dari persamaan:
+
+$$ \tilde{y}_T=\lambda y_t+(1-\lambda)\tilde{y}_{T-1} $$
+
+Nilai parameter $\lambda$ adalah nilai antara 0 dan 1.
+
+Nilai pemulusan periode ke-t bertindak sebagai nilai ramalan pada periode ke-$(T+\tau)$.
+
+$$ \tilde{y}_{T+\tau}(T)=\tilde{y}_T $$
+
+Pemulusan dengan metode SES dapat dilakukan dengan dua fungsi dari *packages* berbeda, yaitu (1) fungsi `ses()` dari *packages* `forecast` dan (2) fungsi `HoltWinters` dari *packages* `stats` .
+
+```{r}
+# SES alpha = 0.2
+ses.1 <- ses(train.ts, h = h_test, alpha = 0.2)
+
+# SES alpha = 0.7
+ses.2 <- ses(train.ts, h = h_test, alpha = 0.7)
+
+# SES dengan alpha optimum
+ses.opt <- ses(train.ts, h = h_test, alpha = NULL)
+
+ses.1
+ses.2
+ses.opt
+```
+
+Pada fungsi `ses()` , terdapat beberapa argumen yang umum digunakan, yaitu
+
+- `y` : nilai data deret waktu
+
+- `alpha` : parameter pemulusan utama (0–1), mengatur bobot data terbaru vs data lama.
+
+- `beta` : parameter pemulusan tren.
+
+- `gamma` : parameter pemulusan musiman.
+
+- `h` : jumlah periode ke depan yang ingin diramalkan (forecast horizon).
+
+Untuk mendapatkan gambar hasil pemulusan pada data latih dengan fungsi `ses()` , perlu digunakan fungsi `autoplot()` dan `autolayer()` .
+
+```{r}
+autoplot(ses.1) +
+  autolayer(fitted(ses.1), series="Fitted") +
+  ylab("Konsentrasi PM2.5 (µg/m³)") + xlab("Periode")
+```
+
+Selanjutnya akan digunakan fungsi `HoltWinters()` dengan nilai inisialisasi parameter dan panjang periode peramalan yang sama dengan fungsi `ses()` .
+
+```{r}
+# Holt-Winters SES
+ses1<- HoltWinters(train.ts, gamma = FALSE, beta = FALSE, alpha = 0.2)
+plot(ses1)
+
+ses2<- HoltWinters(train.ts, gamma = FALSE, beta = FALSE, alpha = 0.7)
+plot(ses2)
+
+HWopt <- HoltWinters(
+  train.ts,
+  gamma = FALSE,
+  beta = FALSE,
+  alpha = NULL
+)
+plot(HWopt)
+
+# Forecast
+ramalan1<- forecast(ses1, h=h_test)
+ramalan1
+
+ramalan2<- forecast(ses2, h=h_test)
+ramalan2
+
+ramalanopt <- forecast(
+  HWopt,
+  h = h_test
+)
+ramalanopt
+```
+
+Fungsi `HoltWinters` memiliki argumen yang sama dengan fungsi `ses()` . 
+Nilai parameter $\alpha$ dari kedua fungsi dapat dioptimalkan menyesuaikan dari *error*-nya paling minimumnya. Caranya adalah dengan membuat parameter $\alpha =$ `NULL` .
+
+
+#### Akurasi Data Latih
+
+Perhitungan akurasi data dapat dilakukan dengan cara langsung maupun manual. Dalam hal ini, kita akan menggunakan cara langsung dengan mengakses nilai-nilai dari objek hasil pemulusan.
+
+```{r}
+# Alpha = 0.2
+SSE1 <- ses1$SSE
+MSE1 <- SSE1 / length(train.ts)
+RMSE1 <- sqrt(MSE1)
+
+# Alpha = 0.7
+SSE2 <- ses2$SSE
+MSE2 <- SSE2 / length(train.ts)
+RMSE2 <- sqrt(MSE2)
+
+# Alpha optimum
+SSEopt <- HWopt$SSE
+MSEopt <- SSEopt / length(train.ts)
+RMSEopt <- sqrt(MSEopt)
+
+# Tabel ringkas
+akurasi_ses_train <- data.frame(
+  Model = c(
+    "SES Alpha 0.2",
+    "SES Alpha 0.7",
+    "SES Optimal"
+  ),
+
+  SSE = c(
+    SSE1,
+    SSE2,
+    SSEopt
+  ),
+
+  MSE = c(
+    MSE1,
+    MSE2,
+    MSEopt
+  ),
+
+  RMSE = c(
+    RMSE1,
+    RMSE2,
+    RMSEopt
+  )
+)
+
+akurasi_ses_train
+```
+Berdasarkan hasil akurasi data latih, SES optimal merupakan model terbaik karena menghasilkan nilai SSE, MSE, dan RMSE paling kecil, yaitu masing-masing 34.834,24; 272,14; dan 16,50. Hal ini menunjukkan bahwa SES optimal memberikan hasil pemulusan yang paling mendekati data aktual dibandingkan SES dengan alpha 0,2 dan 0,7.
+
+#### Akurasi Data Uji
+
+```{r}
+# error (ramalan - aktual), samakan panjang dan tipe numeric
+e1   <- as.numeric(ramalan1$mean)[1:n_test] - as.numeric(testing$pm25)
+e2   <- as.numeric(ramalan2$mean)[1:n_test] - as.numeric(testing$pm25)
+eopt <- as.numeric(ramalanopt$mean)[1:n_test] - as.numeric(testing$pm25)
+
+# SSE / MSE / RMSE untuk masing-masing model (abaikan NA)
+SSEtesting1  <- sum(e1^2,  na.rm = TRUE)
+MSEtesting1  <- mean(e1^2, na.rm = TRUE)
+RMSEtesting1 <- sqrt(MSEtesting1)
+
+SSEtesting2  <- sum(e2^2,  na.rm = TRUE)
+MSEtesting2  <- mean(e2^2, na.rm = TRUE)
+RMSEtesting2 <- sqrt(MSEtesting2)
+
+SSEtestingopt  <- sum(eopt^2,  na.rm = TRUE)
+MSEtestingopt  <- mean(eopt^2, na.rm = TRUE)
+RMSEtestingopt <- sqrt(MSEtestingopt)
+
+# Tabel ringkas
+akurasi_ses_test <- data.frame(
+  Model = c(
+    "SES Alpha 0.2",
+    "SES Alpha 0.7",
+    "SES Optimal"
+  ),
+
+  SSE = c(
+    SSEtesting1,
+    SSEtesting2,
+    SSEtestingopt
+  ),
+
+  MSE = c(
+    MSEtesting1,
+    MSEtesting2,
+    MSEtestingopt
+  ),
+
+  RMSE = c(
+    RMSEtesting1,
+    RMSEtesting2,
+    RMSEtestingopt
+  )
+)
+
+akurasi_ses_test
+```
+Berdasarkan hasil akurasi data uji, SES Alpha 0,2 menghasilkan SSE sebesar 5.519,74, MSE sebesar 167,26, dan RMSE sebesar 12,93. Model SES Alpha 0,2 memiliki nilai error paling kecil dibandingkan model lainnya, sehingga memberikan hasil peramalan terbaik pada data uji.
+
+
+### *Double Exponential Smoothing* (DES)
+
+Metode pemulusan *Double Exponential Smoothing* (DES) digunakan untuk data yang memiliki pola tren. Metode DES adalah metode semacam SES, hanya saja dilakukan dua kali, yaitu pertama untuk tahapan 'level' dan kedua untuk tahapan 'tren'. Pemulusan menggunakan metode ini akan menghasilkan peramalan tidak konstan untuk periode berikutnya.
+
+Pemulusan dengan metode DES kali ini akan menggunakan fungsi `HoltWinters()` . Jika sebelumnya nilai argumen `beta` dibuat `FALSE` , kali ini argumen tersebut akan diinisialisasi bersamaan dengan nilai `alpha` .
+
+```{r}
+# Model 1
+des.1 <- HoltWinters(
+  train.ts,
+  gamma = FALSE,
+  beta = 0.2,
+  alpha = 0.2
+)
+
+ramalandes1 <- forecast(
+  des.1,
+  h = h_test
+)
+
+# Model 2
+des.2 <- HoltWinters(
+  train.ts,
+  gamma = FALSE,
+  beta = 0.3,
+  alpha = 0.6
+)
+
+ramalandes2 <- forecast(
+  des.2,
+  h = h_test
+)
+```
+
+Selanjutnya jika ingin membandingkan plot data latih dan data uji adalah sebagai berikut.
+
+```{r}
+plot(
+  data.ts,
+  main = "Double Exponential Smoothing",
+  xlab = "Periode",
+  ylab = "Konsentrasi PM2.5 (µg/m³)"
+)
+
+lines(
+  des.1$fitted[, 1],
+  lty = 2,
+  col = "blue"
+)
+
+lines(
+  ramalandes1$mean,
+  col = "red"
+)
+```
+Untuk mendapatkan nilai parameter optimum dari DES, argumen `alpha` dan `beta` dapat dibuat `NULL` seperti berikut.
+
+```{r}
+des.opt <- HoltWinters(
+  train.ts,
+  gamma = FALSE
+)
+plot(des.opt)
+
+ramalandesopt <- forecast(
+  des.opt,
+  h = h_test
+)
+```
+
+
+#### Akurasi Data Latih
+
+```{r}
+ssedes.train1 <- des.1$SSE
+msedes.train1 <- ssedes.train1 / length(train.ts)
+
+sisaandes1 <- ramalandes1$residuals
+
+mapedes.train1 <-
+  mean(
+    abs(
+      sisaandes1[3:length(train.ts)] /
+      train.ts[3:length(train.ts)]
+    ) * 100,
+    na.rm = TRUE
+  )
+
+
+ssedes.train2 <- des.2$SSE
+msedes.train2 <- ssedes.train2 / length(train.ts)
+
+sisaandes2 <- ramalandes2$residuals
+
+mapedes.train2 <-
+  mean(
+    abs(
+      sisaandes2[3:length(train.ts)] /
+      train.ts[3:length(train.ts)]
+    ) * 100,
+    na.rm = TRUE
+  )
+
+
+ssedes.trainopt <- des.opt$SSE
+msedes.trainopt <-
+  ssedes.trainopt / length(train.ts)
+
+sisaandesopt <- ramalandesopt$residuals
+
+mapedes.trainopt <-
+  mean(
+    abs(
+      sisaandesopt[3:length(train.ts)] /
+      train.ts[3:length(train.ts)]
+    ) * 100,
+    na.rm = TRUE
+  )
+
+# Tabel ringkas
+akurasi_des_train <- data.frame(
+  Model = c(
+    "DES Skenario 1",
+    "DES Skenario 2",
+    "DES Optimal"
+  ),
+
+  SSE = c(
+    ssedes.train1,
+    ssedes.train2,
+    ssedes.trainopt
+  ),
+
+  MSE = c(
+    msedes.train1,
+    msedes.train2,
+    msedes.trainopt
+  ),
+
+  MAPE = c(
+    mapedes.train1,
+    mapedes.train2,
+    mapedes.trainopt
+  )
+)
+
+akurasi_des_train
+```
+
+Berdasarkan hasil akurasi data latih, DES Optimal menghasilkan SSE sebesar 38.414,89, MSE sebesar 300,12, dan MAPE sebesar 26,67%. Model DES Optimal memiliki nilai error paling kecil dibandingkan kedua skenario lainnya, sehingga memberikan hasil pemulusan terbaik pada data latih.
+
+#### Akurasi Data Uji
+
+```{r}
+selisihdes1 <-
+  as.numeric(ramalandes1$mean) -
+  as.numeric(testing$pm25)
+
+selisihdes2 <-
+  as.numeric(ramalandes2$mean) -
+  as.numeric(testing$pm25)
+
+selisihdesopt <-
+  as.numeric(ramalandesopt$mean) -
+  as.numeric(testing$pm25)
+
+SSEtestingdes1 <-
+  sum(selisihdes1^2)
+
+MSEtestingdes1 <-
+  mean(selisihdes1^2)
+
+MAPEtestingdes1 <-
+  mean(
+    abs(
+      selisihdes1 /
+      testing$pm25
+    ) * 100
+  )
+
+SSEtestingdes2 <-
+  sum(selisihdes2^2)
+
+MSEtestingdes2 <-
+  mean(selisihdes2^2)
+
+MAPEtestingdes2 <-
+  mean(
+    abs(
+      selisihdes2 /
+      testing$pm25
+    ) * 100
+  )
+
+SSEtestingdesopt <-
+  sum(selisihdesopt^2)
+
+MSEtestingdesopt <-
+  mean(selisihdesopt^2)
+
+MAPEtestingdesopt <-
+  mean(
+    abs(
+      selisihdesopt /
+      testing$pm25
+    ) * 100
+  )
+
+# Tabel ringkas
+akurasi_des_test <- data.frame(
+  Model = c(
+    "DES Skenario 1",
+    "DES Skenario 2",
+    "DES Optimal"
+  ),
+
+  SSE = c(
+    SSEtestingdes1,
+    SSEtestingdes2,
+    SSEtestingdesopt
+  ),
+
+  MSE = c(
+    MSEtestingdes1,
+    MSEtestingdes2,
+    MSEtestingdesopt
+  ),
+
+  MAPE = c(
+    MAPEtestingdes1,
+    MAPEtestingdes2,
+    MAPEtestingdesopt
+  )
+)
+
+akurasi_des_test
+```
+Berdasarkan hasil akurasi data uji, DES Optimal menghasilkan MSE terkecil sebesar 577,79, sedangkan DES Skenario 1 menghasilkan MAPE terkecil sebesar 43,98%. Dengan demikian, DES Optimal memiliki kinerja terbaik berdasarkan MSE, sementara DES Skenario 1 lebih baik berdasarkan MAPE. DES Skenario 2 memiliki tingkat kesalahan paling tinggi berdasarkan kedua ukuran tersebut.
+
+#### Perbandingan SES dan DES
+
+```{r}
+MSEfull <- data.frame(
+  Model = c(
+    "SES Alpha 0.2",
+    "SES Alpha 0.7",
+    "SES Optimal",
+    "DES Skenario 1",
+    "DES Skenario 2",
+    "DES Optimal"
+  ),
+
+  MSE = c(
+    MSEtesting1,
+    MSEtesting2,
+    MSEtestingopt,
+    MSEtestingdes1,
+    MSEtestingdes2,
+    MSEtestingdesopt
+  )
+)
+
+MSEfull
+
+# Menentukan model terbaik berdasarkan MSE terkecil
+MSEfull[
+  which.min(MSEfull$MSE),
+]
+```
+Berdasarkan hasil perbandingan MSE pada data uji, metode SES Alpha 0,2 menghasilkan nilai MSE paling kecil, yaitu 167,26. Oleh karena itu, SES Alpha 0,2 dipilih sebagai metode terbaik dalam melakukan peramalan data PM2.5 karena menghasilkan error peramalan paling rendah dibandingkan metode lainnya.
+
+
+#### Seasonal Smoothing
+Karena data yang digunakan merupakan data harian, frekuensi 7 digunakan untuk mengakomodasi pola musiman mingguan. Selanjutnya, dilakukan pemodelan menggunakan metode Holt-Winters aditif dan multiplikatif.
+
+```{r}
+# Pembagian Data
+
+n <- nrow(data)
+
+n_train <- floor(
+  0.8 * n
+)
+
+training_hw <- data[
+  1:n_train,
+]
+
+testing_hw <- data[
+  (n_train + 1):n,
+]
+
+train_hw.ts <- ts(
+  training_hw$pm25,
+  frequency = 7
+)
+
+test_hw.ts <- ts(
+  testing_hw$pm25,
+  frequency = 7
+)
+
+n_train
+nrow(testing_hw)
+```
+Kemudian akan dilakukan ekSplorasi dengan plot data deret waktu sebagai berikut.
+
+```{r}
+## Eksplorasi Data
+
+plot(data$tanggal, data$pm25,
+     type = "o",
+     xlab = "Periode",
+     ylab = "Konsentrasi PM2.5 (µg/m³)",
+     main = "Plot Data PM2.5")
+
+# Data Latih
+plot(training_hw$tanggal, training_hw$pm25,
+     type = "o",
+     col = "blue",
+     xlab = "Periode",
+     ylab = "Konsentrasi PM2.5 (µg/m³)",
+     main = "Data Latih PM2.5")
+
+# Data Uji
+plot(testing_hw$tanggal, testing_hw$pm25,
+     type = "o",
+     col = "red",
+     xlab = "Periode",
+     ylab = "Konsentrasi PM2.5 (µg/m³)",
+     main = "Data Uji PM2.5")
+```
+Metode Holt-Winter untuk peramalan data musiman menggunakan tiga persamaan pemulusan yang terdiri atas persamaan untuk level $(L_t)$, trend $(B_t)$, dan komponen seasonal / musiman $(S_t)$ dengan parameter pemulusan berupa $\alpha$, $\beta$, dan $\gamma$. Metode Holt-Winter musiman terbagi menjadi dua, yaitu metode aditif dan metode multiplikatif. Perbedaan persamaan dan contoh datanya adalah sebagai berikut.
+
+$$L_t = \alpha(Y_t - S_{t-s}) + (1-\alpha)(L_{t-1} + B_{t-1})$$
+
+$$B_t = \beta(L_t - L_{t-1}) + (1-\beta)B_{t-1}$$
+$$S_t = \gamma(Y_t - L_t) + (1-\gamma)S_{t-s}$$
+
+![](images/clipboard-1209508415.png)
+
+Pemulusan data musiman dengan metode Winter dilakukan menggunakan fungsi `HoltWinters()` dengan memasukkan argumen tambahan, yaitu `gamma()` dan `seasonal()` . Arguman `seasonal()` diinisialisasi menyesuaikan jenis musiman, aditif atau multiplikatif.
+
+#### Winter Aditif
+
+```{r}
+# Model Aditif
+winter1 <- HoltWinters(
+  train_hw.ts,
+  alpha = 0.2,
+  beta = 0.1,
+  gamma = 0.1,
+  seasonal = "additive"
+)
+
+winter1
+winter1$fitted
+
+# Model Aditif Optimal
+winter1.opt <- HoltWinters(
+  train_hw.ts,
+  alpha = NULL,
+  beta = NULL,
+  gamma = NULL,
+  seasonal = "additive"
+)
+
+winter1.opt
+winter1.opt$fitted
+```
+
+```{r}
+# Forecast
+h_test <- nrow(testing_hw)
+forecast1 <- predict(
+  winter1,
+  n.ahead = h_test
+)
+
+forecast1.opt <- predict(
+  winter1.opt,
+  n.ahead = h_test
+)
+```
+
+```{r}
+# Plot
+xhat1 <- winter1$fitted[, 2]
+
+xhat1.opt <- winter1.opt$fitted[, 2]
+
+plot(
+  train_hw.ts,
+  main = "Winter Aditif PM2.5",
+  type = "l",
+  xlab = "Periode",
+  ylab = "Konsentrasi PM2.5 (µg/m³)"
+)
+
+lines(
+  xhat1,
+  col = "red",
+  lwd = 2
+)
+
+lines(
+  xhat1.opt,
+  col = "blue",
+  lwd = 2
+)
+
+lines(
+  forecast1,
+  col = "red",
+  lwd = 2
+)
+
+lines(
+  forecast1.opt,
+  col = "blue",
+  lwd = 2
+)
+
+legend(
+  "topleft",
+  c(
+    "Data Aktual",
+    "Winter Aditif",
+    "Winter Aditif Optimal"
+  ),
+  col = c(
+    "black",
+    "red",
+    "blue"
+  ),
+  lty = 1,
+  cex = 0.7
+)
+```
+
+```{r}
+# Akurasi Data Latih
+
+SSE_hw1 <- winter1$SSE
+MSE_hw1 <- SSE_hw1 / length(train_hw.ts)
+RMSE_hw1 <- sqrt(MSE_hw1)
+
+
+SSE_hw1.opt <- winter1.opt$SSE
+MSE_hw1.opt <- SSE_hw1.opt / length(train_hw.ts)
+RMSE_hw1.opt <- sqrt(MSE_hw1.opt)
+
+
+akurasi_hw_train <- data.frame(
+  Model = c("Winter Aditif", "Winter Aditif Optimal"),
+  SSE = c(SSE_hw1, SSE_hw1.opt),
+  MSE = c(MSE_hw1, MSE_hw1.opt),
+  RMSE = c(RMSE_hw1, RMSE_hw1.opt)
+)
+
+akurasi_hw_train
+```
+
+```{r}
+best_hw1_train <-
+  akurasi_hw_train$Model[
+    which.min(
+      akurasi_hw_train$RMSE
+    )
+  ]
+
+cat(
+  "Berdasarkan hasil akurasi data latih,",
+  best_hw1_train,
+  "memiliki nilai RMSE paling kecil. ",
+  "Dengan demikian, model tersebut memberikan",
+  "hasil pemulusan yang lebih baik pada data latih."
+)
+```
+
+```{r}
+# Akurasi Data Uji
+error_hw1 <-
+  as.numeric(forecast1) -
+  as.numeric(test_hw.ts)
+
+error_hw1.opt <-
+  as.numeric(forecast1.opt) -
+  as.numeric(test_hw.ts)
+
+SSE_hw1.test <-
+  sum(error_hw1^2)
+
+MSE_hw1.test <-
+  mean(error_hw1^2)
+
+RMSE_hw1.test <-
+  sqrt(MSE_hw1.test)
+
+SSE_hw1.opt.test <-
+  sum(error_hw1.opt^2)
+
+MSE_hw1.opt.test <-
+  mean(error_hw1.opt^2)
+
+RMSE_hw1.opt.test <-
+  sqrt(MSE_hw1.opt.test)
+
+akurasi_hw_test <- data.frame(
+  Model = c(
+    "Winter Aditif",
+    "Winter Aditif Optimal"
+  ),
+
+  SSE = c(
+    SSE_hw1.test,
+    SSE_hw1.opt.test
+  ),
+
+  MSE = c(
+    MSE_hw1.test,
+    MSE_hw1.opt.test
+  ),
+
+  RMSE = c(
+    RMSE_hw1.test,
+    RMSE_hw1.opt.test
+  )
+)
+
+akurasi_hw_test
+```
+
+```{r}
+best_hw1_test <-
+  akurasi_hw_test$Model[
+    which.min(
+      akurasi_hw_test$RMSE
+    )
+  ]
+
+cat(
+  "Berdasarkan hasil akurasi data uji,",
+  best_hw1_test,
+  "memiliki nilai RMSE paling kecil. ",
+  "Dengan demikian, model tersebut memberikan",
+  "hasil peramalan yang lebih baik pada data uji."
+)
+```
+
+#### Winter Multiplikatif
+Model multiplikatif digunakan cocok digunakan jika plot data asli menunjukkan fluktuasi musiman yang bervariasi.
+```{r}
+# Model Multiplikatif
+winter2 <- HoltWinters(
+  train_hw.ts,
+  alpha = 0.2,
+  beta = 0.1,
+  gamma = 0.3,
+  seasonal = "multiplicative"
+)
+
+winter2
+winter2$fitted
+
+# Model Multiplikatif Optimal
+winter2.opt <- HoltWinters(
+  train_hw.ts,
+  alpha = NULL,
+  beta = NULL,
+  gamma = NULL,
+  seasonal = "multiplicative"
+)
+
+winter2.opt
+winter2.opt$fitted
+```
+
+```{r}
+# Forecast
+forecast2 <- predict(
+  winter2,
+  n.ahead = h_test
+)
+
+forecast2.opt <- predict(
+  winter2.opt,
+  n.ahead = h_test
+)
+```
+
+```{r}
+# Plot
+xhat2 <-
+  winter2$fitted[, 2]
+
+xhat2.opt <-
+  winter2.opt$fitted[, 2]
+
+plot(
+  train_hw.ts,
+  main = "Winter Multiplikatif PM2.5",
+  type = "l",
+  xlab = "Periode",
+  ylab = "Konsentrasi PM2.5 (µg/m³)"
+)
+
+lines(
+  xhat2,
+  col = "red",
+  lwd = 2
+)
+
+lines(
+  xhat2.opt,
+  col = "blue",
+  lwd = 2
+)
+
+lines(
+  forecast2,
+  col = "red",
+  lwd = 2
+)
+
+lines(
+  forecast2.opt,
+  col = "blue",
+  lwd = 2
+)
+
+legend(
+  "topleft",
+  c(
+    "Data Aktual",
+    "Winter Multiplikatif",
+    "Winter Multiplikatif Optimal"
+  ),
+  col = c(
+    "black",
+    "red",
+    "blue"
+  ),
+  lty = 1,
+  cex = 0.7
+)
+```
+
+```{r}
+# Akurasi Data Latih
+SSE_hw2 <- winter2$SSE
+
+MSE_hw2 <-
+  SSE_hw2 /
+  length(train_hw.ts)
+
+RMSE_hw2 <-
+  sqrt(MSE_hw2)
+
+SSE_hw2.opt <-
+  winter2.opt$SSE
+
+MSE_hw2.opt <-
+  SSE_hw2.opt /
+  length(train_hw.ts)
+
+RMSE_hw2.opt <-
+  sqrt(MSE_hw2.opt)
+
+akurasi_hw2_train <- data.frame(
+  Model = c(
+    "Winter Multiplikatif",
+    "Winter Multiplikatif Optimal"
+  ),
+
+  SSE = c(
+    SSE_hw2,
+    SSE_hw2.opt
+  ),
+
+  MSE = c(
+    MSE_hw2,
+    MSE_hw2.opt
+  ),
+
+  RMSE = c(
+    RMSE_hw2,
+    RMSE_hw2.opt
+  )
+)
+
+akurasi_hw2_train
+```
+
+```{r}
+best_hw2_train <-
+  akurasi_hw2_train$Model[
+    which.min(
+      akurasi_hw2_train$RMSE
+    )
+  ]
+
+cat(
+  "Berdasarkan hasil akurasi data latih,",
+  best_hw2_train,
+  "memiliki nilai RMSE paling kecil. ",
+  "Dengan demikian, model tersebut memberikan",
+  "hasil pemulusan yang lebih baik pada data latih."
+)
+```
+
+```{r}
+# Akurasi Data Uji
+error_hw2 <-
+  as.numeric(forecast2) -
+  as.numeric(test_hw.ts)
+
+error_hw2.opt <-
+  as.numeric(forecast2.opt) -
+  as.numeric(test_hw.ts)
+
+SSE_hw2.test <-
+  sum(error_hw2^2)
+
+MSE_hw2.test <-
+  mean(error_hw2^2)
+
+RMSE_hw2.test <-
+  sqrt(MSE_hw2.test)
+
+SSE_hw2.opt.test <-
+  sum(error_hw2.opt^2)
+
+MSE_hw2.opt.test <-
+  mean(error_hw2.opt^2)
+
+RMSE_hw2.opt.test <-
+  sqrt(MSE_hw2.opt.test)
+
+akurasi_hw2_test <- data.frame(
+  Model = c(
+    "Winter Multiplikatif",
+    "Winter Multiplikatif Optimal"
+  ),
+
+  SSE = c(
+    SSE_hw2.test,
+    SSE_hw2.opt.test
+  ),
+
+  MSE = c(
+    MSE_hw2.test,
+    MSE_hw2.opt.test
+  ),
+
+  RMSE = c(
+    RMSE_hw2.test,
+    RMSE_hw2.opt.test
+  )
+)
+
+akurasi_hw2_test
+```
+
+```{r}
+best_hw2_test <-
+  akurasi_hw2_test$Model[
+    which.min(
+      akurasi_hw2_test$RMSE
+    )
+  ]
+
+cat(
+  "Berdasarkan hasil akurasi data uji,",
+  best_hw2_test,
+  "memiliki nilai RMSE paling kecil. ",
+  "Dengan demikian, model tersebut memberikan",
+  "hasil peramalan yang lebih baik pada data uji."
+)
+```
+
+## Perbandingan Semua Model  
+```{r}
+perbandingan_model <- data.frame(
+  Model = c(
+    "SMA m=4",
+    "DMA m=4",
+    "SES Alpha=0.2",
+    "SES Alpha=0.7",
+    "SES Optimal",
+    "DES Skenario 1",
+    "DES Skenario 2",
+    "DES Optimal",
+    "Winter Aditif",
+    "Winter Aditif Optimal",
+    "Winter Multiplikatif",
+    "Winter Multiplikatif Optimal"
+  ),
+
+  RMSE = c(
+    sqrt(MSE_test.sma),
+    sqrt(MSE_test.dma),
+
+    RMSEtesting1,
+    RMSEtesting2,
+    RMSEtestingopt,
+
+    sqrt(MSEtestingdes1),
+    sqrt(MSEtestingdes2),
+    sqrt(MSEtestingdesopt),
+
+    RMSE_hw1.test,
+    RMSE_hw1.opt.test,
+
+    RMSE_hw2.test,
+    RMSE_hw2.opt.test
+  )
+)
+
+perbandingan_model
+```
+
+```{r}
+perbandingan_model <-
+  perbandingan_model[
+    order(perbandingan_model$RMSE),
+  ]
+
+perbandingan_model
+```
+
+```{r}
+model_terbaik <-
+  perbandingan_model$Model[1]
+
+rmse_terbaik <-
+  perbandingan_model$RMSE[1]
+
+cat(
+  "Berdasarkan hasil perbandingan pada data uji, model terbaik adalah",
+  model_terbaik,
+  "dengan nilai RMSE sebesar",
+  rmse_terbaik,
+  ". Model tersebut dipilih karena memiliki nilai RMSE paling kecil dibandingkan model lainnya."
+)
+```
+
+
+
+
+
+
+
