@@ -948,7 +948,7 @@ MSEfull[
 Berdasarkan hasil perbandingan MSE pada data uji, metode SES Alpha 0,2 menghasilkan nilai MSE paling kecil, yaitu 167,26. Oleh karena itu, SES Alpha 0,2 dipilih sebagai metode terbaik dalam melakukan peramalan data PM2.5 karena menghasilkan error peramalan paling rendah dibandingkan metode lainnya.
 
 
-#### Seasonal Smoothing
+## Seasonal Smoothing
 Karena data yang digunakan merupakan data harian, frekuensi 7 digunakan untuk mengakomodasi pola musiman mingguan. Selanjutnya, dilakukan pemodelan menggunakan metode Holt-Winters aditif dan multiplikatif.
 
 ```{r}
