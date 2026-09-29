@@ -3,14 +3,8 @@ title: "Pemodelan ARIMA - Pendugaan Parameter, Diagnostik Model, dan Peramalan"
 author: "Fadly Syabani"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
-  html_document:
-    toc: true
-    toc_float: true
-    toc_depth: 4
-    number_sections: true
-    theme: cosmo
-    highlight: tango
-    code_folding: show
+   github_document:
+    pandoc_args: --webtex
 ---
 
 ## Packages
@@ -25,24 +19,29 @@ library(TSA)
 library(TTR)
 library(aTSA)
 library(graphics)
+library(readxl)
 ```
 
 ## Data 
 
 ### Input Data
 
-Data yang akan digunakan adalah data kualitas udara **PM2.5** harian yang berisi 161 pengamatan dari tanggal 18 September 2024 hingga 28 Februari 2025.
+Data yang akan digunakan adalah data kualitas udara **PM2.5** harian dari stasiun **DKI 1 (Bunderan HI)** yang berisi 781 pengamatan dari tanggal 1 Januari 2023 hingga 28 Februari 2025 (terdapat 9 hari yang datanya tidak tercatat dari total 790 hari kalender pada rentang tersebut, sehingga
+data diperlakukan sebagai deret waktu berurutan berdasarkan urutan pengamatan yang tersedia).
 
 ```{r}
-datapm25 <- read.csv("dataset_mpdw.csv")
-colnames(datapm25) <- c("tanggal", "pm25")
+datapm25 <- read_excel("dataset_pm25.xlsx", sheet = "FULL")
+
+colnames(datapm25) <- c("tanggal", "stasiun", "pm25")
+
 datapm25$tanggal <- as.Date(datapm25$tanggal, format = "%m/%d/%Y")
+
 pm25.ts <- ts(datapm25$pm25)
+
 str(datapm25)
 ```
 
-Data kemudian dibagi menjadi data latih dan data uji. Pembagian kali ini
-dilakukan dengan proporsi / perbandingan, yaitu 80:20.
+Data kemudian dibagi menjadi data latih dan data uji dengan proporsi 80:20, yaitu 625 data latih dan 156 data uji.
 
 ```{r}
 n <- length(pm25.ts)
@@ -55,207 +54,224 @@ c(Total = n, Train = length(train.ts), Test = length(test.ts))
 ```
 
 ### Eksplorasi Data
-
-Sebelum masuk dalam tahap pemodelan, dilakukan eksplorasi data dengan
-plot deret waktu untuk melihat pola data.
+#### Plot Data Penuh
 
 ```{r}
-#--PLOT TIME SERIES--#
 plot.ts(pm25.ts, 
         lty = 1, 
         xlab = "Waktu (hari ke-)", 
         ylab = "PM2.5", 
-        main = "Plot Data PM2.5")
+        main = "Plot Data PM2.5 (DKI1 Bunderan HI)")
 ```
 
-Berdasarkan plot data deret waktu, konsentrasi PM2.5 berfluktuasi naik
-turun di sekitar suatu nilai tengah tanpa memperlihatkan tren naik atau
-turun yang jelas dalam jangka panjang, meskipun tampak sedikit
-pergeseran level pada pertengahan periode pengamatan.
+Berdasarkan plot data deret waktu, konsentrasi PM2.5 memperlihatkan pola naik turun yang berulang menyerupai gelombang musiman tahunan: level relatif rendah di awal tahun (sekitar 40-60 µg/m³), meningkat ke level tinggi pada pertengahan tahun (mencapai 100-120 µg/m³), lalu turun kembali ke level rendah menjelang akhir/awal tahun berikutnya, dan pola ini berulang setiap tahun selama periode pengamatan (2023-2025). Pola ini mengindikasikan bahwa data belum tentu stasioner dalam rataan, karena rata-rata data bergeser naik-turun mengikuti waktu, bukan konstan di sekitar satu nilai tengah tertentu.
+
+#### Plot Data Latih
 
 ```{r}
-#--PLOT DATA LATIH---#
 plot.ts(train.ts, lty = 1, xlab = "Waktu", ylab = "PM2.5", main = "Plot PM2.5 Data Latih")
 ```
 
+#### Plot Data Uji
+
 ```{r}
-#--PLOT DATA UJI---#
 plot.ts(test.ts, lty = 1, xlab = "Waktu", ylab = "PM2.5", main = "Plot PM2.5 Data Uji")
 ```
 
+Data uji berada pada periode September 2024 - Februari 2025, yang mencakup fase penurunan konsentrasi PM2.5 dari level tinggi menuju rendah sesuai pola musiman yang teridentifikasi pada data penuh.
+
+### Uji Stasioneritas Data
+
+#### Plot ACF
+
 ```{r}
-#--CEK KESTASIONERAN---#
-acf(train.ts, lag.max = 20, main = "ACF Data Latih")
+acf(train.ts, lag.max = 40, main = "ACF Data Latih")
 ```
 
-Plot ACF menurun secara bertahap (*tails off*) namun cukup cepat
-mendekati nol, mengindikasikan data cenderung sudah stasioner dalam
-rataan.
+Plot ACF menurun secara sangat perlahan (*tails off slowly*) dan masih bernilai cukup tinggi (di atas 0,35) hingga lag ke-40. Hal ini menjadi indikasi kuat bahwa data tidak stasioner dalam rataan.
+
+#### Uji ADF
 
 ```{r}
 tseries::adf.test(train.ts)
-#stasioner
 ```
 
 $H_0$ : Data tidak stasioner dalam rataan
 
 $H_1$ : Data stasioner dalam rataan
 
-Berdasarkan uji ADF, diperoleh *p-value* sebesar 0,0498 yang lebih kecil
-dari taraf nyata 5% sehingga tolak $H_0$ dan disimpulkan bahwa data
-sudah stasioner dalam rataan (meskipun nilainya berada tidak jauh dari
-batas 0,05). Dengan demikian, proses *differencing* tidak diperlukan
-untuk data ini.
+Berdasarkan uji ADF, diperoleh *p-value* sebesar 0,0544 yang lebih besar dari taraf nyata 5% sehingga tak tolak $H_0$ dan disimpulkan bahwa **data tidak stasioner dalam rataan**. Hal ini sesuai dengan hasil eksplorasi menggunakan plot deret waktu dan plot ACF, sehingga ketidakstasioneran data perlu ditangani sebelum masuk ke tahap identifikasi model.
 
+#### Plot Box-Cox
 
 ```{r}
 index <- seq(1:length(train.ts))
 
-# Box-Cox
 bc <- boxcox(train.ts ~ index, lambda = seq(-2, 4, by = 0.1))
 
-# Nilai lambda optimum
 lambda_opt <- bc$x[which.max(bc$y)]
 lambda_opt
 
-# Selang kepercayaan 95% untuk lambda
 ci_lambda <- bc$x[bc$y > max(bc$y) - 0.5 * qchisq(0.95, df = 1)]
 
 ci_lower <- min(ci_lambda)
 ci_upper <- max(ci_lambda)
 
-# Batas bawah dan batas atas
 c(Batas_Bawah = ci_lower, Batas_Atas = ci_upper)
 ```
-Nilai *rounded value* ($\lambda$) optimum berada di sekitar 1,15 dengan
-selang kepercayaan 95% antara 0,85 dan 1,52. Karena selang tersebut
-memuat nilai satu, dapat disimpulkan bahwa data sudah stasioner dalam
-ragam sehingga transformasi tidak diperlukan.
 
+Nilai *rounded value* ($\lambda$) optimum berada di sekitar 1,52 dengan selang kepercayaan 95% antara 1,27 dan 1,70. Karena selang tersebut **tidak memuat nilai satu**, data juga belum stasioner dalam ragam. Kedua bentuk ketidakstasioneran ini (rataan dan ragam) akan ditangani sekaligus melalui proses *differencing*.
+
+### Penanganan Ketidakstasioneran Data
+
+```{r}
+# Differencing pertama
+train.diff <- diff(train.ts, differences = 1)
+
+# Plot hasil differencing
+plot.ts(train.diff, lty = 1, xlab = "Waktu", ylab = "PM2.5 Differencing 1",
+        main = "Plot Data PM2.5 Differencing 1")
+abline(h = 0, col = "red", lty = 2)
+```
+
+Berdasarkan plot data deret waktu hasil *differencing* orde pertama, terlihat bahwa data sudah bergerak stabil di sekitar nilai nol tanpa memperlihatkan tren maupun pola musiman jangka panjang, mengindikasikan data sudah stasioner dalam rataan.
+
+#### Plot ACF Setelah Differencing
+
+```{r}
+acf(train.diff, lag.max = 40, main = "ACF Data Differencing 1")
+```
+
+Plot ACF data hasil *differencing* menurun tajam dan berada dalam selang tidak signifikan setelah lag ke-1, menandakan ketidakstasioneran dalam rataan telah berhasil ditangani.
+
+#### Uji ADF Setelah Differencing
+
+```{r}
+tseries::adf.test(train.diff)
+```
+
+Berdasarkan uji ADF pada data hasil *differencing*, diperoleh *p-value* sebesar 0,01 yang lebih kecil dari taraf nyata 5% sehingga tolak $H_0$; **data sudah stasioner dalam rataan** setelah dilakukan *differencing* satu kali (d=1).
+
+#### Plot Box-Cox Setelah Differencing
+
+```{r}
+# Sesuaikan panjang index karena differencing menghilangkan 1 observasi awal
+index_diff <- seq(1:length(train.diff))
+
+# Cek nilai negatif/nol, tambahkan konstanta agar semua nilai > 0
+min_val <- min(train.diff)
+if (min_val <= 0) {
+  konstanta <- abs(min_val) + 1
+  train.diff_shifted <- train.diff + konstanta
+} else {
+  train.diff_shifted <- train.diff
+}
+
+bc_diff <- boxcox(train.diff_shifted ~ index_diff, lambda = seq(0.5, 2, by = 0.1))
+
+lambda_opt_diff <- bc_diff$x[which.max(bc_diff$y)]
+lambda_opt_diff
+
+ci_lambda_diff <- bc_diff$x[bc_diff$y > max(bc_diff$y) - 0.5 * qchisq(0.95, df = 1)]
+
+c(Batas_Bawah = min(ci_lambda_diff), Batas_Atas = max(ci_lambda_diff))
+```
+
+Setelah *differencing*, nilai $\lambda$ optimum menjadi sekitar 0,91 dengan selang kepercayaan 95% antara 0,77 dan 1,06. Selang ini **memuat nilai satu**, sehingga data hasil *differencing* juga sudah stasioner dalam ragam. Dengan demikian, proses *differencing* satu kali (d=1) berhasil menangani ketidakstasioneran baik dalam rataan maupun ragam, dan analisis dapat dilanjutkan ke tahap identifikasi model dengan model ARIMA(p,1,q).
 
 ### Identifikasi Model
-
-Karena data sudah stasioner dalam rataan dan ragam tanpa perlu
-*differencing*, identifikasi model dilanjutkan langsung menggunakan
-plot ACF, PACF, dan EACF pada data latih.
 
 #### Plot ACF dan PACF
 
 ```{r}
-#---SPESIFIKASI MODEL---#
 par(mfrow = c(1,2))
-acf(train.ts, lag.max = 20, main = "ACF")
-pacf(train.ts, lag.max = 20, main = "PACF")
+acf(train.diff, lag.max = 40, main = "ACF")
+pacf(train.diff, lag.max = 40, main = "PACF")
 par(mfrow = c(1,1))
 ```
 
-Plot ACF meluruh secara perlahan (*tails off*), sedangkan plot PACF
-*cuts off* tegas pada lag pertama. Pola ini mengindikasikan model
-tentatif ARIMA(1,0,0).
+Plot ACF *cuts off* tegas pada lag pertama (nilai negatif signifikan), sedangkan plot PACF meluruh secara berangsur (*tails off*) pada beberapa lag pertama sebelum masuk ke selang tidak signifikan. Pola ini mengindikasikan model tentatif ARIMA(0,1,1) atau, jika PACF turut dianggap *cuts off* pada lag pertama, model ARIMA(1,1,1).
 
 #### Plot EACF
 
 ```{r}
-eacf(train.ts)
+eacf(train.diff)
 ```
 
-Berdasarkan pola segitiga nol pada plot EACF, ujung segitiga berada
-pada AR(1) dan MA(1) sehingga model tentatif tambahan yang terbentuk
-adalah ARIMA(1,0,1), beserta model di sekitarnya seperti ARIMA(2,0,1)
-dan ARIMA(2,0,0) sebagai kandidat pembanding.
+Berdasarkan pola segitiga nol pada plot EACF, diperoleh beberapa model tentatif tambahan, yaitu ARIMA(0,1,2), ARIMA(2,1,1), dan ARIMA(1,1,2).
 
-### Pendugaan Parameter
-
-Selanjutnya akan dilakukan pendugaan parameter kelima model ARIMA yang
-terbentuk sebelumnya. Pendugaan dilakukan dengan fungsi `Arima()` yang
-dilanjutkan dengan melihat nilai AIC pada ringkasan data dan melihat
-signifikansi parameter.
+### Pendugaan Parameter Model Tentatif
 
 ```{r}
 #---PENDUGAAN PARAMETER MODEL---#
-model1.pm=Arima(train.ts, order=c(1,0,0), method="ML")
-summary(model1.pm) #AIC=1091.60
-lmtest::coeftest(model1.pm) #seluruh parameter signifikan
+model1.pm=Arima(train.diff, order=c(0,0,1), method="ML")
+summary(model1.pm) #AIC=4938.02
+lmtest::coeftest(model1.pm) #ma1 signifikan
 
-model2.pm=Arima(train.ts, order=c(0,0,1), method="ML")
-summary(model2.pm) #AIC=1117.17
-lmtest::coeftest(model2.pm) #seluruh parameter signifikan
+model2.pm=Arima(train.diff, order=c(1,0,0), method="ML")
+summary(model2.pm) #AIC=4985.38
+lmtest::coeftest(model2.pm) #ar1 signifikan
 
-model3.pm=Arima(train.ts, order=c(1,0,1), method="ML")
-summary(model3.pm) #AIC=1089.85
-lmtest::coeftest(model3.pm) #ma1 tidak signifikan pada alpha 5%
+model3.pm=Arima(train.diff, order=c(1,0,1), method="ML")
+summary(model3.pm) #AIC=4896.62
+lmtest::coeftest(model3.pm) #ar1 dan ma1 signifikan
 
-model4.pm=Arima(train.ts, order=c(2,0,0), method="ML")
-summary(model4.pm) #AIC=1090.61
-lmtest::coeftest(model4.pm) #ar2 tidak signifikan
+model4.pm=Arima(train.diff, order=c(0,0,2), method="ML")
+summary(model4.pm) #AIC=4908.39
+lmtest::coeftest(model4.pm) #ma1 dan ma2 signifikan
 
-model5.pm=Arima(train.ts, order=c(2,0,1), method="ML")
-summary(model5.pm) #AIC=1085.09
-lmtest::coeftest(model5.pm) #seluruh parameter signifikan
+model5.pm=Arima(train.diff, order=c(2,0,1), method="ML")
+summary(model5.pm) #AIC=4897.24
+lmtest::coeftest(model5.pm) #ar2 tidak signifikan
 
-#model yang dipilih adalah model 5, yaitu ARIMA(2,0,1)
+model6.pm=Arima(train.diff, order=c(1,0,2), method="ML")
+summary(model6.pm) #AIC=4897.01
+lmtest::coeftest(model6.pm) #ma2 tidak signifikan
+
+#model yang dipilih adalah model 3, yaitu ARIMA(1,1,1)
 ```
+### Ringkasan AIC dan BIC
 
 ```{r}
 model_tentatif <- data.frame(
-  Model = c("ARIMA(1,0,0)", "ARIMA(0,0,1)", "ARIMA(1,0,1)",
-            "ARIMA(2,0,0)", "ARIMA(2,0,1)"),
+  Model = c("ARIMA(0,1,1)", "ARIMA(1,1,0)", "ARIMA(1,1,1)",
+            "ARIMA(0,1,2)", "ARIMA(2,1,1)", "ARIMA(1,1,2)"),
   AIC   = c(AIC(model1.pm), AIC(model2.pm), AIC(model3.pm),
-            AIC(model4.pm), AIC(model5.pm)),
+            AIC(model4.pm), AIC(model5.pm), AIC(model6.pm)),
   BIC   = c(BIC(model1.pm), BIC(model2.pm), BIC(model3.pm),
-            BIC(model4.pm), BIC(model5.pm))
+            BIC(model4.pm), BIC(model5.pm), BIC(model6.pm))
 )
 
 model_tentatif
 ```
 
-Berdasarkan pendugaan parameter di atas, nilai AIC dan BIC terkecil
-dimiliki oleh model **ARIMA(2,0,1)** dan seluruh parameternya juga
-signifikan pada taraf nyata 5% sehingga model ARIMA(2,0,1) dipilih
-sebagai model terbaik.
+Berdasarkan pendugaan parameter di atas, nilai AIC dan BIC terkecil dimiliki oleh model **ARIMA(1,1,1)**, dengan parameter ar1 dan ma1 yang keduanya signifikan pada taraf nyata 5%, sehingga model ARIMA(1,1,1) dipilih sebagai model terbaik.
 
 ### Analisis Sisaan
-
-Model terbaik hasil identifikasi kemudian dicek asumsi sisaannya. Sisaan
-model ARIMA harus memenuhi asumsi normalitas, kebebasan, dan kehomogenan
-ragam. Diagnostik model dilakukan secara eksplorasi dan uji formal.
 
 #### Eksplorasi Sisaan
 
 ```{r}
-#Eksplorasi
-model.terbaik.pm <- Arima(train.ts, order = c(2,0,1), method = "ML")
+model.terbaik.pm <- Arima(train.diff, order = c(1,0,1), method = "ML")
 sisaan.pm <- model.terbaik.pm$residuals
 
 par(mfrow = c(2,2),
     mar = c(4,4,2,1),
     oma = c(0,0,2,0))
 
-# Q-Q Plot
 qqnorm(sisaan.pm, main = "Normal Q-Q Plot")
 qqline(sisaan.pm, col = "blue", lwd = 2)
 
-# Plot Sisaan vs Waktu
 plot(sisaan.pm, type = "p",
      main = "Plot Sisaan vs Waktu",
      xlab = "Waktu", ylab = "Sisaan")
 
-# ACF
 acf(sisaan.pm, main = "ACF Sisaan")
-
-# PACF
 pacf(sisaan.pm, main = "PACF Sisaan")
 par(mfrow = c(1,1))
 ```
 
-Berdasarkan plot kuantil-kuantil normal, sisaan menyebar cukup mengikuti
-garis $45^{\circ}$ meski terdapat sedikit penyimpangan di kedua ujung.
-Plot sisaan terhadap waktu memperlihatkan lebar pita yang relatif
-bervariasi pada beberapa periode, mengindikasikan kemungkinan
-ketidakhomogenan ragam. Sementara itu, plot ACF dan PACF sisaan tidak
-menunjukkan *spike* yang signifikan, sehingga secara visual sisaan
-dapat dianggap saling bebas. Kondisi-kondisi ini akan diuji lebih lanjut
-dengan uji formal.
+Berdasarkan plot kuantil-kuantil normal, titik-titik sisaan mengikuti garis $45^{\circ}$ dengan cukup baik, hanya menyimpang sedikit di kedua ujung. Plot sisaan terhadap waktu memperlihatkan lebar pita yang relatif seragam sepanjang waktu, mengindikasikan ragam yang homogen. Plot ACF dan PACF sisaan tidak menunjukkan *spike* yang signifikan, sehingga secara visual sisaan sudah saling bebas.
 
 #### Uji Formal
 
@@ -268,10 +284,7 @@ $H_0$ : Sisaan menyebar normal
 
 $H_1$ : Sisaan tidak menyebar normal
 
-Berdasarkan uji KS, diperoleh *p-value* sebesar 0,992 yang lebih besar
-dari taraf nyata 5% sehingga gagal tolak $H_0$ dan disimpulkan bahwa
-sisaan menyebar normal. Hasil ini sejalan dengan eksplorasi plot
-kuantil-kuantil normal.
+*P-value* uji KS sebesar 0,791 (> 5%) sehingga gagal tolak $H_0$; sisaan menyebar normal.
 
 ```{r}
 #2) Sisaan saling bebas/tidak ada autokorelasi
@@ -282,8 +295,7 @@ $H_0$ : Sisaan saling bebas
 
 $H_1$ : Sisaan tidak saling bebas
 
-*P-value* uji Ljung-Box sebesar 0,982 (> 5%) sehingga gagal tolak $H_0$;
-sisaan saling bebas (tidak ada autokorelasi yang tersisa).
+*P-value* uji Ljung-Box sebesar 0,655 (> 5%) sehingga gagal tolak $H_0$; sisaan saling bebas.
 
 ```{r}
 #3) Sisaan homogen
@@ -294,12 +306,7 @@ $H_0$ : Ragam sisaan homogen
 
 $H_1$ : Ragam sisaan tidak homogen
 
-*P-value* uji Ljung-Box pada sisaan kuadrat sebesar 0,0067 (< 5%)
-sehingga tolak $H_0$; ragam sisaan **tidak homogen**. Hal ini wajar
-terjadi pada data polusi udara riil yang cenderung memiliki gejolak
-ragam (*volatility clustering*) dan menjadi catatan bahwa model dapat
-dikembangkan lebih lanjut (misalnya dengan pendekatan ARCH/GARCH) jika
-diperlukan pemodelan ragam yang lebih akurat.
+*P-value* uji Ljung-Box pada sisaan kuadrat sebesar 0,473 (> 5%) sehingga gagal tolak $H_0$; ragam sisaan **homogen**.
 
 ```{r}
 #4) Nilai tengah sisaan sama dengan nol
@@ -310,102 +317,94 @@ $H_0$ : nilai tengah sisaan sama dengan 0
 
 $H_1$ : nilai tengah sisaan tidak sama dengan 0
 
-*P-value* uji-t sebesar 0,479 (> 5%) sehingga gagal tolak $H_0$; nilai
-tengah sisaan sama dengan nol.
+*P-value* uji-t sebesar 0,9998 (> 5%) sehingga gagal tolak $H_0$; nilai tengah sisaan sama dengan nol.
+
+Dengan demikian, model ARIMA(1,1,1) memenuhi **seluruh** asumsi diagnostik sisaan: normalitas, kebebasan, kehomogenan ragam, dan nilai tengah nol.
 
 ### Overfitting
 
-Tahapan selanjutnya adalah *overfitting* dengan menaikkan orde AR(p)
-dan MA(q) dari model ARIMA(2,0,1). Kandidat model *overfitting* adalah
-ARIMA(3,0,1) dan ARIMA(2,0,2).
-
 ```{r}
 #---OVERFITTING---#
-model5a.pm=Arima(train.ts, order=c(3,0,1),method="ML")
-summary(model5a.pm) #AIC=1087.09
-lmtest::coeftest(model5a.pm) #ar3 tidak signifikan
+model3a.pm=Arima(train.diff, order=c(2,0,1),method="ML")
+summary(model3a.pm) #AIC=4897.24
+lmtest::coeftest(model3a.pm) #ar2 tidak signifikan
 
-model5b.pm=Arima(train.ts, order=c(2,0,2),method="ML")
-summary(model5b.pm) #AIC=1087.09
-lmtest::coeftest(model5b.pm) #ma2 tidak signifikan
+model3b.pm=Arima(train.diff, order=c(1,0,2),method="ML")
+summary(model3b.pm) #AIC=4897.01
+lmtest::coeftest(model3b.pm) #ma2 tidak signifikan
 
-#model yang dipilih tetap model awal, yaitu ARIMA(2,0,1)
+#model yang dipilih tetap model awal, yaitu ARIMA(1,1,1)
 ```
 
 ```{r}
 overfitting.pm <- data.frame(
-  Model = c("ARIMA(2,0,1)", "ARIMA(3,0,1)", "ARIMA(2,0,2)"),
-  AIC   = c(AIC(model.terbaik.pm), AIC(model5a.pm), AIC(model5b.pm)),
-  BIC   = c(BIC(model.terbaik.pm), BIC(model5a.pm), BIC(model5b.pm))
+  Model = c("ARIMA(1,1,1)", "ARIMA(2,1,1)", "ARIMA(1,1,2)"),
+  AIC   = c(AIC(model.terbaik.pm), AIC(model3a.pm), AIC(model3b.pm)),
+  BIC   = c(BIC(model.terbaik.pm), BIC(model3a.pm), BIC(model3b.pm))
 )
 
 overfitting.pm
 ```
 
-Kedua model hasil *overfitting* memiliki AIC dan BIC yang lebih besar
-dibandingkan model ARIMA(2,0,1), dan parameter tambahan pada
-masing-masing model (ar3 pada ARIMA(3,0,1) dan ma2 pada ARIMA(2,0,2))
-tidak signifikan. Oleh karena itu, model **ARIMA(2,0,1)** tetap dipilih
-sebagai model terbaik untuk digunakan pada tahap peramalan.
+Kedua model hasil *overfitting* memiliki AIC dan BIC yang lebih besar dibandingkan ARIMA(1,1,1), dan parameter tambahan pada masing-masing model (ar2 pada ARIMA(2,1,1) dan ma2 pada ARIMA(1,1,2)) tidak
+signifikan. Oleh karena itu, model **ARIMA(1,1,1)** tetap dipilih sebagai model terbaik.
 
-### Model Terbaik: ARIMA(2,0,1)
+### Model Terbaik: ARIMA(1,1,1)
 
 ```{r}
-model.terbaik.pm <- Arima(train.ts, order = c(2,0,1), method = "ML")
+model.terbaik.pm <- Arima(train.diff, order = c(1,0,1), method = "ML")
 summary(model.terbaik.pm)
 lmtest::coeftest(model.terbaik.pm)
 ```
 
 ### Peramalan
 
-Peramalan dilakukan menggunakan fungsi `forecast()` sepanjang data uji
-(32 hari ke depan).
+Peramalan dilakukan menggunakan fungsi `forecast()` sepanjang data uji (156 hari ke depan), kemudian hasil ramalan pada skala *differencing* dikembalikan ke skala data asli menggunakan `diffinv()` dengan titik awal berupa nilai terakhir data latih.
+
 
 ```{r}
 #---FORECAST---#
 ramalan.pm <- forecast::forecast(model.terbaik.pm, h = length(test.ts))
-ramalan.pm
-data.ramalan.pm <- ramalan.pm$mean
 plot(ramalan.pm)
 ```
 
-Berdasarkan plot hasil ramalan, nilai ramalan model ARIMA(2,0,1)
-cenderung konvergen dengan cepat menuju nilai tengah proses (sekitar
-55-60), yang merupakan karakteristik khas model AR/ARMA yang stasioner
-dengan koefisien AR yang tidak terlalu dekat dengan 1.
-
 ```{r}
+# Inverse differencing
+pt_akhir_train <- tail(train.ts, 1)
+
+forecast_level <- diffinv(ramalan.pm$mean, differences = 1, xi = pt_akhir_train)
+hasil.pm <- forecast_level[-1]
+
 perbandingan.pm <- data.frame(
   Aktual   = as.numeric(test.ts),
-  Forecast = as.numeric(data.ramalan.pm)
+  Forecast = as.numeric(hasil.pm)
 )
-perbandingan.pm
+head(perbandingan.pm, 10)
 
 # Akurasi
-accuracy(as.numeric(data.ramalan.pm), as.numeric(test.ts))
+accuracy(as.numeric(hasil.pm), as.numeric(test.ts))
 ```
 
 ```{r}
 # Plot perbandingan data aktual penuh dengan hasil forecast
 ts.plot(pm25.ts, col = "black", lty = 1,
         xlab = "Waktu (hari ke-)", ylab = "PM2.5",
-        main = "Aktual vs Forecast PM2.5")
+        main = "Aktual vs Forecast PM2.5 (DKI1 Bunderan HI)")
 
-lines((ntrain + 1):n, as.numeric(data.ramalan.pm), col = "blue", lty = 2, lwd = 2)
+lines((ntrain + 1):n, as.numeric(hasil.pm), col = "blue", lty = 2, lwd = 2)
 legend("topleft", 
        legend = c("Data Aktual", "Forecast"),
        col = c("black", "blue"),
        lty = c(1,2), lwd = c(1,2), bty = "n")
 ```
 
+Nilai ramalan model ARIMA(1,1,1) memperlihatkan tren yang meningkat secara perlahan dan cenderung linier mengikuti rataan perubahan (*drift*) harian pada data latih. Pada horizon peramalan yang panjang (156 hari), pola ini tidak mampu mengikuti pola musiman turun-naik pada data uji (yang justru berada pada fase penurunan musiman menuju awal tahun 2025), sehingga akurasi peramalan untuk horizon sepanjang ini relatif rendah (RMSE $\approx$ 34,6 dan MAPE $\approx$ 68,8%).
+
 ### Kesimpulan
 
-Model **ARIMA(2,0,1)** terpilih sebagai model terbaik untuk data PM2.5
-karena memiliki AIC dan BIC terendah di antara model tentatif, seluruh
-parameter signifikan, serta lolos sebagian besar uji diagnostik sisaan
-(normalitas, kebebasan, dan nilai tengah nol), kecuali asumsi
-kehomogenan ragam yang tidak terpenuhi — hal yang umum dijumpai pada
-data lingkungan/polusi udara riil. Hasil peramalan pada data uji
-menghasilkan RMSE sekitar 12,4 dan MAPE sekitar 21%, yang menunjukkan
-model cukup baik dalam menangkap level rata-rata PM2.5 meskipun kurang
-mampu mengikuti fluktuasi harian yang tajam pada data uji.
+Data PM2.5 stasiun DKI1 (Bunderan HI) **tidak stasioner** baik dalam rataan (uji ADF: p-value = 0,0544) maupun ragam (Box-Cox: $\lambda\approx 1,52$, selang kepercayaan tidak memuat satu) pada kondisi awal. Setelah dilakukan *differencing* satu kali (d=1), data menjadi stasioner dalam rataan (uji ADF: p-value = 0,01) sekaligus dalam ragam (Box-Cox pada data ter-*shift*:$\lambda\approx0,91$, selang memuat satu), sehingga tidak diperlukan transformasi Box-Cox tambahan.
+
+Model **ARIMA(1,1,1)** terpilih sebagai model terbaik karena memiliki AIC dan BIC terendah di antara model tentatif, seluruh parameter AR dan MA signifikan, tidak terkalahkan oleh model hasil *overfitting*, serta **lolos seluruh uji diagnostik sisaan** (normalitas, kebebasan, kehomogenan ragam, dan nilai tengah nol) di mana hal tersebut merupakan hasil yang sangat baik untuk kecocokan model dalam sampel (*in-sample fit*).
+
+Namun demikian, pada horizon peramalan yang panjang (156 hari), performa ramalan model ini relatif kurang baik (RMSE $\approx$ 34,6;MAPE $\approx$ 68,8%) karena data memiliki pola musiman tahunan yang tidak dapat ditangkap oleh model ARIMA non-musiman. Model ARIMA(1,1,1) pada dasarnya berasumsi bahwa laju perubahan (*drift*) harian bersifat konstan, sehingga untuk horizon yang panjang, ramalan cenderung bergerak searah drift tersebut alih-alih mengikuti pola naik-turun musiman yang sesungguhnya. Untuk hasil peramalan jangka panjang yang lebih akurat pada data ini, dapat dipertimbangkan pendekatan model musiman seperti **SARIMA** yang secara eksplisit menangkap pola
+tahunan tersebut, atau membatasi horizon peramalan pada jangka yang lebih pendek (misalnya 7-30 hari ke depan) di mana asumsi *drift* konstan lebih realistis.
